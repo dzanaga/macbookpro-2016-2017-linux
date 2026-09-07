@@ -37,3 +37,4 @@ mbp2016 logs touchbar
 `repair` skips healthy components and may install packages or download driver
 source. `reinstall` always runs the selected component installer again.
 Run `mbp2016 help` for the full command list.
+
