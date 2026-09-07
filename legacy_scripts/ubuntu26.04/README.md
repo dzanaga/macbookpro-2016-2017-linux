@@ -1,5 +1,8 @@
 # Linux (Ubuntu 26.04) setup on Macbook Pro 2016 (MacBookPro 13,3)
 
+> **Legacy installer:** retained for previous Ubuntu installations. The main
+> project interface is the [`mbp2016` CLI](../../mbp2016-cli/README.md).
+
 Ubuntu setup scripts for my 2016 MacBookPro13,3 fresh installs.
 
 This does personal setup work as well as hardware fixes. By default it can enable full passwordless sudo, install baseline developer packages, configure Wi-Fi firmware, build sound and Touch Bar drivers, and install a suspend workaround.
@@ -59,7 +62,8 @@ DRY_RUN=1 ./install.sh
 
 ## Wi-Fi Template
 
-The Broadcom template in `assets/wifi/brcmfmac43602-pcie.template.txt` is derived from my working BCM43602 file. The installer replaces:
+The shared Broadcom template in `../../assets/wifi/brcmfmac43602-pcie.template.txt`
+is derived from my working BCM43602 file. The installer replaces:
 
 - `{{WIFI_MACADDR}}` with the detected Wi-Fi interface MAC address.
 - `{{WIFI_COUNTRY}}` with `WIFI_COUNTRY` from `config.env`.

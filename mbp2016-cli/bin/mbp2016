@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+VERSION=0.1.0
+SUPPORTED_MODELS=(MacBookPro13,3 MacBookPro14,3)
+LIBEXEC="${MBP2016_LIBEXEC:-/usr/lib/mbp2016}"
+CONFIG_FILE="${MBP2016_CONFIG:-/etc/mbp2016.conf}"
+
+if [ ! -d "$LIBEXEC/legacy/scripts" ]; then
+  candidate="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+  [ -d "$candidate/legacy_scripts/omarchy4/scripts" ] && LIBEXEC="$candidate/legacy_scripts/omarchy4"
+fi
+
+model_name() { cat "${MBP2016_SYSFS_ROOT:-/sys}/class/dmi/id/product_name" 2>/dev/null || printf unknown; }
+supported_model() {
+  local model item
+  model="$(model_name)"
+  for item in "${SUPPORTED_MODELS[@]}"; do [ "$model" = "$item" ] && return 0; done
+  return 1
+}
+module_path() { modinfo -n "$1" 2>/dev/null || true; }
+service_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+has_glob() { compgen -G "$1" >/dev/null 2>&1; }
+
+component_state() {
+  case "$1" in
+    wifi) has_glob "${MBP2016_ROOT:-}/usr/lib/firmware/brcm/brcmfmac43602-pcie*.txt" ;;
+    sound) [ -n "$(module_path snd_hda_codec_cs8409)" ] ;;
+    touchbar)
+      [ -n "$(module_path apple_ibridge)" ] &&
+        service_active touchbar.service &&
+        has_glob "${MBP2016_SYSFS_ROOT:-/sys}/bus/hid/devices/0003:05AC:8600.*/fnmode"
+      ;;
+    camera) [ -n "$(module_path apple_ib_als)" ] && [ -n "$(module_path uvcvideo)" ] ;;
+    usbc) service_active mbp13-usbc-power.service || service_active mbp2016-usbc-power.service ;;
+    suspend) [ -f "${MBP2016_ROOT:-}/etc/systemd/sleep.conf.d/10-mbp13-suspend.conf" ] ;;
+    *) return 2 ;;
+  esac
+}
+
+component_detail() {
+  case "$1" in
+    wifi) printf 'BCM43602 firmware' ;;
+    sound) printf 'CS8409 module for %s' "$(uname -r)" ;;
+    touchbar) printf 'T1 bridge, service and HID controls' ;;
+    camera) printf 'T1 ALS and UVC modules' ;;
+    usbc) printf 'Alpine Ridge power service' ;;
+    suspend) printf 'suspend configuration' ;;
+  esac
+}
+
+status_text() {
+  local component state failed=0
+  printf 'mbp2016 %s — %s\n\n' "$VERSION" "$(model_name)"
+  supported_model || printf '! Unsupported model; expected MacBookPro13,3 or MacBookPro14,3\n\n'
+  for component in wifi sound touchbar camera usbc suspend; do
+    if component_state "$component"; then state='✓'; else state='✗'; failed=1; fi
+    printf '%s %-9s %s\n' "$state" "$component" "$(component_detail "$component")"
+  done
+  return "$failed"
+}
+
+status_json() {
+  local component healthy comma='' failed=0
+  printf '{"version":"%s","model":"%s","supported":%s,"components":{' \
+    "$VERSION" "$(model_name)" "$(supported_model && printf true || printf false)"
+  for component in wifi sound touchbar camera usbc suspend; do
+    if component_state "$component"; then healthy=true; else healthy=false; failed=1; fi
+    printf '%s"%s":{"healthy":%s}' "$comma" "$component" "$healthy"
+    comma=,
+  done
+  printf '}}\n'
+  return "$failed"
+}
+
+require_supported() {
+  supported_model && return 0
+  printf 'mbp2016: unsupported model %s (expected MacBookPro13,3 or MacBookPro14,3)\n' "$(model_name)" >&2
+  [ "${MBP2016_ALLOW_UNSUPPORTED:-0}" = 1 ] || exit 2
+}
+
+legacy_script() {
+  local path
+  if [ -d "$LIBEXEC/legacy/scripts" ]; then path="$LIBEXEC/legacy/$1"; else path="$LIBEXEC/$1"; fi
+  [ -f "$path" ] || { printf 'mbp2016: repair backend missing: %s\n' "$path" >&2; exit 1; }
+  MBP13_ROOT="$(dirname -- "$(dirname -- "$path")")" CONFIG_FILE="$CONFIG_FILE" bash "$path"
+}
+
+repair_component() {
+  case "$1" in
+    wifi) legacy_script scripts/20-wifi.sh ;;
+    sound) legacy_script scripts/30-sound.sh ;;
+    touchbar) legacy_script scripts/40-touchbar-camera.sh ;;
+    camera) legacy_script scripts/40-touchbar-camera.sh ;;
+    usbc) legacy_script scripts/45-usbc-power.sh ;;
+    suspend) legacy_script scripts/50-suspend.sh ;;
+    all)
+      legacy_script scripts/20-wifi.sh && legacy_script scripts/10-misc.sh &&
+        legacy_script scripts/30-sound.sh && legacy_script scripts/40-touchbar-camera.sh &&
+        legacy_script scripts/45-usbc-power.sh && legacy_script scripts/50-suspend.sh
+      ;;
+    *) printf 'mbp2016: unknown component: %s\n' "$1" >&2; exit 2 ;;
+  esac
+}
+
+repair_requested() {
+  local mode="$1" component="$2" item
+  if [ "$mode" = reinstall ]; then
+    repair_component "$component"
+    return
+  fi
+  if [ "$component" = all ]; then
+    for item in wifi sound touchbar usbc suspend; do
+      if component_state "$item"; then
+        printf '✓ %s is healthy; skipping\n' "$item"
+      else
+        printf 'Repairing %s…\n' "$item"
+        repair_component "$item" || return
+      fi
+    done
+  elif component_state "$component"; then
+    printf '✓ %s is already healthy; use "reinstall %s" to force installation\n' "$component" "$component"
+  else
+    repair_component "$component"
+  fi
+}
+
+ensure_touchbar() {
+  component_state touchbar && return 0
+  [ "$(id -u)" -eq 0 ] || { printf 'mbp2016: ensure must run as root\n' >&2; return 1; }
+  if [ -z "$(module_path apple_ibridge)" ]; then
+    if command -v dkms >/dev/null && [ -e "/usr/lib/modules/$(uname -r)/build/Makefile" ]; then
+      dkms autoinstall -k "$(uname -r)" || true
+      depmod -a || true
+    fi
+  fi
+  systemctl restart touchbar.service || true
+  [ -x /usr/local/sbin/mbp13-touchbar-settings ] && /usr/local/sbin/mbp13-touchbar-settings || true
+  component_state touchbar
+}
+
+usage() {
+  cat <<'EOF'
+Usage: mbp2016 COMMAND [COMPONENT]
+
+Commands:
+  status [--json]            Show live hardware status
+  check                      Alias for status
+  repair COMPONENT           Repair wifi, sound, touchbar, camera, usbc, suspend, or all
+  reinstall COMPONENT        Force the component's installer to run again
+  ensure touchbar [--boot]   Conservatively recover an installed Touch Bar
+  logs [touchbar]            Show service logs
+  version                    Show the CLI version
+  help                       Show this help
+
+The mbp2017 command is an alias for mbp2016.
+EOF
+}
+
+main() {
+  local command="${1:-status}" component
+  case "$command" in
+    status|check)
+      if [ "${2:-}" = --json ]; then status_json; else status_text; fi
+      ;;
+    repair|reinstall)
+      component="${2:-}"; [ -n "$component" ] || { usage >&2; exit 2; }
+      require_supported
+      if [ "$(id -u)" -ne 0 ]; then exec sudo "$0" "$command" "$component"; fi
+      repair_requested "$command" "$component"
+      ;;
+    ensure)
+      [ "${2:-}" = touchbar ] || { usage >&2; exit 2; }
+      require_supported; ensure_touchbar
+      ;;
+    logs)
+      [ "${2:-touchbar}" = touchbar ] || { printf 'mbp2016: only touchbar logs are currently available\n' >&2; exit 2; }
+      journalctl -u touchbar.service -u mbp2016-touchbar-health.service --no-pager -n 100
+      ;;
+    version|--version|-V) printf 'mbp2016 %s\n' "$VERSION" ;;
+    help|--help|-h) usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"

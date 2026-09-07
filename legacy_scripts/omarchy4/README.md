@@ -1,9 +1,12 @@
-# Omarchy 4 on a 2016 MacBook Pro (MacBookPro13,3)
+# Legacy Omarchy 4 installer
 
-These scripts adapt the hardware fixes in this repository to Omarchy 4 / Arch
-Linux. They use `pacman`, Arch kernel headers, the in-kernel Touch Bar drivers,
-and Omarchy's non-interactive Limine/mkinitcpio integration. They do not run
-Ubuntu checks or display the generic mkinitcpio wrapper's Limine prompt.
+These Bash scripts are retained for existing installations and as the current
+repair backend for `mbp2016`. New installations should use the
+[`mbp2016` CLI](../../mbp2016-cli/README.md) from the repository root.
+
+The scripts support `MacBookPro13,3` (2016) and `MacBookPro14,3` (2017). They
+use `pacman`, Arch kernel headers, DKMS, and Omarchy's non-interactive
+Limine/mkinitcpio integration.
 
 ## Fresh install
 

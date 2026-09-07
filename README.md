@@ -1,16 +1,45 @@
-# Linux on a 2016 MacBook Pro (MacBookPro13,3)
+# Linux on 2016–2017 T1 MacBook Pro
 
-Hardware-fix and setup scripts for running several Linux distributions on a
-2016 MacBook Pro with a T1 iBridge.
+Hardware support for `MacBookPro13,3` (2016) and `MacBookPro14,3` (2017),
+including Wi-Fi, sound, Touch Bar, camera, USB-C power, and suspend fixes.
 
-Choose the directory matching the installed system:
+## Install
 
-- [`ubuntu-26.04/`](ubuntu-26.04/) — Ubuntu 26.04
-- [`omarchy-4/`](omarchy-4/) — Omarchy 4 (Arch Linux)
+On Omarchy 4, clone this repository and install the Arch package:
 
-Each directory is self-contained apart from the Omarchy Wi-Fi installer, which
-reuses the same machine-specific Broadcom NVRAM template as Ubuntu. Read that
-directory's README and configuration before running anything.
+```bash
+cd mbp2016-cli/packaging/arch
+makepkg -si
+mbp2016 status
+```
 
-The scripts target this particular MacBook model. They are not intended as a
-generic installer for arbitrary Apple hardware.
+The installer also provides `mbp2017` as an alias and enables a conservative
+Touch Bar health check at boot.
+
+## Use
+
+```bash
+mbp2016 status
+mbp2016 status --json
+sudo mbp2016 repair touchbar
+sudo mbp2016 reinstall touchbar
+sudo mbp2016 repair sound
+sudo mbp2016 repair wifi
+sudo mbp2016 repair all
+mbp2016 logs touchbar
+```
+
+See [`mbp2016-cli/README.md`](mbp2016-cli/README.md) for the full CLI guide.
+
+## Previous installers
+
+Earlier Bash-based installers are kept for reference and existing installations:
+
+- [`legacy_scripts/ubuntu26.04/`](legacy_scripts/ubuntu26.04/) — Ubuntu 26.04
+- [`legacy_scripts/omarchy4/`](legacy_scripts/omarchy4/) — Omarchy 4
+
+New Omarchy installations should use the CLI. The legacy folders retain their
+own configuration and detailed documentation.
+
+The project targets T1-equipped MacBook Pro hardware and is not a generic
+installer for arbitrary Apple computers.

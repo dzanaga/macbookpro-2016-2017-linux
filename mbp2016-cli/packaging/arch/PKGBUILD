@@ -1,0 +1,28 @@
+pkgname=mbp2016
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='T1 hardware support for 2016-2017 MacBookPro13,3 and MacBookPro14,3'
+arch=('x86_64')
+url='https://github.com/dzanaga/macbookpro-2016-2017-linux'
+license=('custom')
+depends=('bash' 'dkms' 'systemd' 'usbutils')
+optdepends=('linux-headers: build DKMS modules for the standard kernel')
+backup=('etc/mbp2016.conf')
+source=()
+sha256sums=()
+install=mbp2016.install
+
+package() {
+  local root="$startdir/../../.."
+  local legacy="$root/legacy_scripts/omarchy4"
+  install -Dm755 "$root/mbp2016-cli/bin/mbp2016" "$pkgdir/usr/bin/mbp2016"
+  ln -s mbp2016 "$pkgdir/usr/bin/mbp2017"
+  install -Dm644 "$root/mbp2016-cli/config/mbp2016.conf" "$pkgdir/etc/mbp2016.conf"
+  install -Dm644 "$root/mbp2016-cli/systemd/mbp2016-touchbar-health.service" \
+    "$pkgdir/usr/lib/systemd/system/mbp2016-touchbar-health.service"
+  install -Dm644 "$root/mbp2016-cli/config/mbp2016.conf" "$pkgdir/usr/lib/mbp2016/legacy/config.env"
+  install -Dm644 "$root/assets/wifi/brcmfmac43602-pcie.template.txt" \
+    "$pkgdir/usr/lib/mbp2016/legacy/assets/wifi/brcmfmac43602-pcie.template.txt"
+  install -Dm755 "$legacy/install.sh" "$legacy/wifi.sh" -t "$pkgdir/usr/lib/mbp2016/legacy"
+  install -Dm755 "$legacy"/scripts/*.sh -t "$pkgdir/usr/lib/mbp2016/legacy/scripts"
+}

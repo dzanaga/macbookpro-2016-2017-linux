@@ -1,0 +1,18 @@
+post_install() {
+  systemctl daemon-reload
+  systemctl enable mbp2016-touchbar-health.service
+  printf '%s\n' 'Run "mbp2016 status" to inspect hardware support.'
+}
+
+post_upgrade() {
+  systemctl daemon-reload
+  systemctl try-restart mbp2016-touchbar-health.service || true
+}
+
+pre_remove() {
+  systemctl disable mbp2016-touchbar-health.service || true
+}
+
+post_remove() {
+  systemctl daemon-reload
+}

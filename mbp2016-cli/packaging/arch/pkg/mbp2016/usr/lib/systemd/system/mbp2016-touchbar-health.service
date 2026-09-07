@@ -1,0 +1,12 @@
+[Unit]
+Description=Verify the MacBook Pro T1 Touch Bar
+After=touchbar.service
+Wants=touchbar.service
+ConditionVirtualization=!container
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mbp2016 ensure touchbar --boot
+
+[Install]
+WantedBy=multi-user.target
