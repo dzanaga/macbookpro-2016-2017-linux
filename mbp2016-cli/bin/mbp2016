@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-VERSION=0.1.0
+VERSION=0.2.0
 SUPPORTED_MODELS=(MacBookPro13,3 MacBookPro14,3)
 LIBEXEC="${MBP2016_LIBEXEC:-/usr/lib/mbp2016}"
 CONFIG_FILE="${MBP2016_CONFIG:-/etc/mbp2016.conf}"
+BESPOKE_KERNEL_PACKAGE="${MBP2016_BESPOKE_KERNEL_PACKAGE:-linux-omarchy}"
+BESPOKE_KERNEL_AFFECTED_VERSION="${MBP2016_BESPOKE_KERNEL_AFFECTED_VERSION:-7.2.5-3}"
 
 if [ ! -d "$LIBEXEC/legacy/scripts" ]; then
   candidate="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
@@ -21,6 +23,15 @@ supported_model() {
 module_path() { modinfo -n "$1" 2>/dev/null || true; }
 service_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
 has_glob() { compgen -G "$1" >/dev/null 2>&1; }
+bespoke_kernel_version() {
+  if [ -n "${MBP2016_BESPOKE_KERNEL_VERSION:-}" ]; then
+    printf '%s\n' "$MBP2016_BESPOKE_KERNEL_VERSION"
+  else
+    pacman -Q "$BESPOKE_KERNEL_PACKAGE" 2>/dev/null | awk '{print $2}'
+  fi
+}
+bespoke_kernel_affected() { [ "$(bespoke_kernel_version)" = "$BESPOKE_KERNEL_AFFECTED_VERSION" ]; }
+limine_dropin() { printf '%s/etc/limine-entry-tool.d/zz-mbp2016-intel-iommu.conf' "${MBP2016_ROOT:-}"; }
 
 component_state() {
   case "$1" in
@@ -34,6 +45,10 @@ component_state() {
     camera) [ -n "$(module_path apple_ib_als)" ] && [ -n "$(module_path uvcvideo)" ] ;;
     usbc) service_active mbp13-usbc-power.service || service_active mbp2016-usbc-power.service ;;
     suspend) [ -f "${MBP2016_ROOT:-}/etc/systemd/sleep.conf.d/10-mbp13-suspend.conf" ] ;;
+    bespoke-kernel)
+      ! bespoke_kernel_affected ||
+        grep -Eq '^[[:space:]]*KERNEL_CMDLINE\[linux-omarchy\].*intel_iommu=off' "$(limine_dropin)" 2>/dev/null
+      ;;
     *) return 2 ;;
   esac
 }
@@ -46,6 +61,13 @@ component_detail() {
     camera) printf 'T1 ALS and UVC modules' ;;
     usbc) printf 'Alpine Ridge power service' ;;
     suspend) printf 'suspend configuration' ;;
+    bespoke-kernel)
+      if bespoke_kernel_affected; then
+        printf '%s %s Limine IOMMU workaround' "$BESPOKE_KERNEL_PACKAGE" "$(bespoke_kernel_version)"
+      else
+        printf 'no known bespoke-kernel workaround required'
+      fi
+      ;;
   esac
 }
 
@@ -53,7 +75,7 @@ status_text() {
   local component state failed=0
   printf 'mbp2016 %s — %s\n\n' "$VERSION" "$(model_name)"
   supported_model || printf '! Unsupported model; expected MacBookPro13,3 or MacBookPro14,3\n\n'
-  for component in wifi sound touchbar camera usbc suspend; do
+  for component in wifi bespoke-kernel sound touchbar camera usbc suspend; do
     if component_state "$component"; then state='✓'; else state='✗'; failed=1; fi
     printf '%s %-9s %s\n' "$state" "$component" "$(component_detail "$component")"
   done
@@ -64,7 +86,7 @@ status_json() {
   local component healthy comma='' failed=0
   printf '{"version":"%s","model":"%s","supported":%s,"components":{' \
     "$VERSION" "$(model_name)" "$(supported_model && printf true || printf false)"
-  for component in wifi sound touchbar camera usbc suspend; do
+  for component in wifi bespoke-kernel sound touchbar camera usbc suspend; do
     if component_state "$component"; then healthy=true; else healthy=false; failed=1; fi
     printf '%s"%s":{"healthy":%s}' "$comma" "$component" "$healthy"
     comma=,
@@ -86,6 +108,46 @@ legacy_script() {
   MBP13_ROOT="$(dirname -- "$(dirname -- "$path")")" CONFIG_FILE="$CONFIG_FILE" bash "$path"
 }
 
+repair_bespoke_kernel() {
+  local version target content directory temporary update_command
+  version="$(bespoke_kernel_version)"
+  if [ -z "$version" ]; then
+    printf '✓ %s is not installed; no bespoke-kernel patch is needed\n' "$BESPOKE_KERNEL_PACKAGE"
+    return
+  fi
+  if [ "$version" != "$BESPOKE_KERNEL_AFFECTED_VERSION" ]; then
+    printf '✓ %s %s is not the known affected version %s; no patch applied\n' \
+      "$BESPOKE_KERNEL_PACKAGE" "$version" "$BESPOKE_KERNEL_AFFECTED_VERSION"
+    return
+  fi
+
+  target="$(limine_dropin)"
+  directory="$(dirname -- "$target")"
+  content="# MacBookPro13,3/14,3 workaround for linux-omarchy 7.2.5-3.
+# https://github.com/omacom/omarchy/issues/12119
+KERNEL_CMDLINE[linux-omarchy]+=\" intel_iommu=off\"
+"
+  mkdir -p "$directory"
+  temporary="$(mktemp "$directory/.zz-mbp2016-intel-iommu.conf.XXXXXX")"
+  printf '%s' "$content" >"$temporary"
+  chmod 0644 "$temporary"
+  if [ -f "$target" ] && cmp -s "$temporary" "$target"; then
+    rm -f "$temporary"
+    printf '✓ Limine workaround is already installed for %s %s\n' "$BESPOKE_KERNEL_PACKAGE" "$version"
+  else
+    mv -f "$temporary" "$target"
+    printf 'Installed %s for %s %s\n' "$target" "$BESPOKE_KERNEL_PACKAGE" "$version"
+  fi
+
+  update_command="${MBP2016_LIMINE_UPDATE:-limine-update}"
+  command -v "$update_command" >/dev/null 2>&1 || {
+    printf 'mbp2016: %s is not installed; cannot rebuild Limine entries\n' "$update_command" >&2
+    return 1
+  }
+  "$update_command"
+  printf 'Reboot and select the %s entry to use the workaround.\n' "$BESPOKE_KERNEL_PACKAGE"
+}
+
 repair_component() {
   case "$1" in
     wifi) legacy_script scripts/20-wifi.sh ;;
@@ -94,8 +156,9 @@ repair_component() {
     camera) legacy_script scripts/40-touchbar-camera.sh ;;
     usbc) legacy_script scripts/45-usbc-power.sh ;;
     suspend) legacy_script scripts/50-suspend.sh ;;
+    bespoke-kernel|bespoken-kernel) repair_bespoke_kernel ;;
     all)
-      legacy_script scripts/20-wifi.sh && legacy_script scripts/10-misc.sh &&
+      legacy_script scripts/20-wifi.sh && repair_bespoke_kernel && legacy_script scripts/10-misc.sh &&
         legacy_script scripts/30-sound.sh && legacy_script scripts/40-touchbar-camera.sh &&
         legacy_script scripts/45-usbc-power.sh && legacy_script scripts/50-suspend.sh
       ;;
@@ -110,7 +173,7 @@ repair_requested() {
     return
   fi
   if [ "$component" = all ]; then
-    for item in wifi sound touchbar usbc suspend; do
+    for item in wifi bespoke-kernel sound touchbar usbc suspend; do
       if component_state "$item"; then
         printf '✓ %s is healthy; skipping\n' "$item"
       else
@@ -146,7 +209,8 @@ Usage: mbp2016 COMMAND [COMPONENT]
 Commands:
   status [--json]            Show live hardware status
   check                      Alias for status
-  repair COMPONENT           Repair wifi, sound, touchbar, camera, usbc, suspend, or all
+  repair COMPONENT           Repair wifi, bespoke-kernel, sound, touchbar, camera, usbc,
+                             suspend, or all
   reinstall COMPONENT        Force the component's installer to run again
   ensure touchbar [--boot]   Conservatively recover an installed Touch Bar
   logs [touchbar]            Show service logs

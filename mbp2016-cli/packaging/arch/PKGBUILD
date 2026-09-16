@@ -1,11 +1,11 @@
 pkgname=mbp2016
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='T1 hardware support for 2016-2017 MacBookPro13,3 and MacBookPro14,3'
 arch=('x86_64')
 url='https://github.com/dzanaga/macbookpro-2016-2017-linux'
 license=('custom')
-depends=('bash' 'dkms' 'systemd' 'usbutils')
+depends=('bash' 'dkms' 'systemd' 'usbutils' 'limine-mkinitcpio-hook')
 optdepends=('linux-headers: build DKMS modules for the standard kernel')
 backup=('etc/mbp2016.conf')
 source=()
