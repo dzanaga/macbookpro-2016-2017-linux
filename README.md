@@ -103,6 +103,25 @@ On 15-inch models (`MacBookPro13,3` and `MacBookPro14,3`) with discrete AMD Rade
    uwsm stop
    ```
 
+### Mouse pointer offset / flicker on the external display
+
+With `AQ_NO_ATOMIC=1` (legacy KMS) on the AMD GPU and fractional monitor scaling (e.g. `1.333` on a 1440p ultrawide, `1.6` on the internal panel), Hyprland's hardware cursor misbehaves:
+
+- The click hotspot is offset from the drawn pointer: in text editors (e.g. Sublime Text) clicking with the I-beam places the caret one line above and one character to the left.
+- The pointer flickers and hides inconsistently when it stops moving.
+
+Fix: use software cursors. Add to the `cursor` block in `~/.config/hypr/looknfeel.lua`:
+
+```lua
+hl.config({
+  cursor = {
+    no_hardware_cursors = 1,
+  },
+})
+```
+
+Hyprland auto-reloads the config; check with `hyprctl getoption cursor:no_hardware_cursors` (should print `int: 1`). The GPU cost is negligible even at 144 Hz.
+
 
 ## Links
 
